@@ -87,8 +87,9 @@ sqlite3 .octobots/relay.db \
    WHERE sender='user@agentcraft' ORDER BY created_at DESC LIMIT 1;"
 ```
 
-The role's normal taskbox listener picks it up the same way as any user
-message.
+The supervisor's main-loop poll (default 15 s) sees the new row and
+dispatches it to the role's tmux pane via `send-keys` — same code path
+as any other taskbox message.
 
 ## Configuration (env vars)
 
@@ -152,7 +153,8 @@ flowchart TD
     sink -->|POST /event<br/>WS subscribe| ac[AgentCraft UI]
     ac -->|user_prompt over WS| inbound[inbound.py]
     inbound -->|INSERT pending row| db
-    db --> listener[role's taskbox listener]
+    db --> dispatch[supervisor poll<br/>tmux send-keys]
+    dispatch --> rolepane[role's tmux pane]
 ```
 
 Module map:
@@ -219,9 +221,10 @@ calls instead of one:
 **User reply**: the user types a free-text response into PM's hero chat
 in AC. That arrives as `user_prompt` over WS and lands in `relay.db`
 as a normal taskbox message (`sender="user@agentcraft", recipient="pm"`).
-PM's listener picks it up and parses approval (PM is responsible for
-matching the reply to the outstanding request — FIFO is fine since
-`plan-feature/SKILL.md` already enforces one-at-a-time).
+The supervisor's poll dispatches it to PM's pane within ~15 s; PM
+parses approval and is responsible for matching the reply to the
+outstanding request — FIFO is fine since `plan-feature/SKILL.md`
+already enforces one-at-a-time.
 
 **Closing the loop**: PM acks the original `recipient="user"` message
 once it has parsed the reply. That fires `MessageDoneEvent` →

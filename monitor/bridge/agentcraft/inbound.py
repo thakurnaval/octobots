@@ -5,8 +5,10 @@ Frame shapes the AC server sends to subscribed external listeners:
   - {type:"user_prompt", sessionId, prompt}
         UI typed a prompt aimed at a session. We insert a pending row
         into relay.db with sender="user@agentcraft" and
-        recipient=sessionId. The role's normal taskbox listener picks
-        it up — same code path as a user message from any other source.
+        recipient=sessionId. The supervisor's main-loop poll
+        (scripts/supervisor.py, default 15s interval) sees the row and
+        dispatches it to the role's tmux pane via send-keys — same
+        code path as a user message from any other source.
 
   - {type:"permission_response", sessionId, requestId, approved}
         UI clicked approve/deny. Supervisor doesn't yet have a
