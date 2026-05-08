@@ -36,6 +36,13 @@ env_get() {
 # Write or update a key in .env.octobots
 env_set() {
     local key="$1" val="$2"
+    # Sanitize: trim leading/trailing whitespace and any trailing slashes.
+    # Common paste mishap: copying a token from a URL like
+    # https://api.telegram.org/bot<TOKEN>/ leaves a stray trailing slash,
+    # which silently breaks Telegram routing.
+    val="${val#"${val%%[![:space:]]*}"}"
+    val="${val%"${val##*[![:space:]]}"}"
+    val="${val%/}"
     if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
         # Update existing line (portable sed)
         local tmp; tmp=$(mktemp)

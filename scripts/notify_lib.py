@@ -70,8 +70,11 @@ def _load_env() -> None:
 
 def credentials() -> Optional[tuple[str, str]]:
     _load_env()
-    token = os.environ.get("OCTOBOTS_TG_TOKEN", "").strip()
-    chat = os.environ.get("OCTOBOTS_TG_OWNER", "").strip()
+    # Strip whitespace + any stray trailing slash. A copy-paste from
+    # https://api.telegram.org/bot<TOKEN>/ leaves a slash that silently
+    # breaks every Telegram URL we build (bot<TOKEN>//sendMessage → 404).
+    token = os.environ.get("OCTOBOTS_TG_TOKEN", "").strip().rstrip("/")
+    chat = os.environ.get("OCTOBOTS_TG_OWNER", "").strip().rstrip("/")
     if not token or not chat:
         return None
     return token, chat
