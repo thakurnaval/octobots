@@ -58,7 +58,7 @@ class AgentCraftSink:
 
     async def start(self) -> None:
         try:
-            enforce.ensure_analytics_disabled()
+            enforce.ensure_settings()
         except OSError as e:
             log.warning(
                 "could not write agentcraft settings.json (%s); "
@@ -72,6 +72,7 @@ class AgentCraftSink:
     async def run(self) -> None:
         await self._wait_for_ac()
         await self._verify_analytics_off()
+        await self._disable_project_filter_runtime()
         await self._replay_snapshot()
         await asyncio.gather(
             self.client.run_outbound(),
@@ -134,6 +135,26 @@ class AgentCraftSink:
             settings.get("analyticsEnabled"),
             config.SETTINGS_PATH,
         )
+
+    async def _disable_project_filter_runtime(self) -> None:
+        """Flip AC's projectFilter off in-memory so heroes appear.
+
+        Without this, AC filters our WS subscribes (synthetic sessionIds
+        don't match its ~/.claude/projects/<slug>/ scan results) and no
+        placeholder heroes get created.
+
+        We also write projectFilter:false to settings.json (in start())
+        so the next AC restart picks it up automatically.
+        """
+        ok = await self.client.disable_project_filter()
+        if ok:
+            log.info("agentcraft projectFilter disabled at runtime")
+        else:
+            log.warning(
+                "could not POST /settings/project-filter at runtime — "
+                "heroes may not appear until agentcraft restarts and "
+                "reads the settings.json we wrote",
+            )
 
     async def _replay_snapshot(self) -> None:
         agents = self.world.snapshot_agents()

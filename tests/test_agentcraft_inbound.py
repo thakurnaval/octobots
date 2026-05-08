@@ -1,4 +1,5 @@
-"""Inbound routing — verifies user_prompt frames land in relay.db."""
+"""Inbound routing — verifies user_prompt frames land in relay.db,
+plus enforce.ensure_settings semantics."""
 from __future__ import annotations
 
 import sqlite3
@@ -112,3 +113,46 @@ def test_insert_returns_unique_ids(db_path: Path):
     )
     assert a != b
     assert len(_rows(db_path)) == 2
+
+
+def test_ensure_settings_writes_both_keys(tmp_path: Path):
+    import json
+    from monitor.bridge.agentcraft import enforce
+
+    p = tmp_path / "settings.json"
+    enforce.ensure_settings(p)
+    data = json.loads(p.read_text())
+    assert data == {"analyticsEnabled": False, "projectFilter": False}
+    assert enforce.is_satisfied(p)
+
+
+def test_ensure_settings_preserves_other_keys(tmp_path: Path):
+    import json
+    from monitor.bridge.agentcraft import enforce
+
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({
+        "analyticsEnabled": True,  # will be overwritten
+        "projectFilter": True,     # will be overwritten
+        "mapTheme": "dark",        # preserved
+        "masterVolume": 0.7,       # preserved
+    }))
+    enforce.ensure_settings(p)
+    data = json.loads(p.read_text())
+    assert data == {
+        "analyticsEnabled": False,
+        "projectFilter": False,
+        "mapTheme": "dark",
+        "masterVolume": 0.7,
+    }
+
+
+def test_is_satisfied_requires_both_keys(tmp_path: Path):
+    import json
+    from monitor.bridge.agentcraft import enforce
+
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"analyticsEnabled": False}))  # missing projectFilter
+    assert not enforce.is_satisfied(p)
+    p.write_text(json.dumps({"analyticsEnabled": False, "projectFilter": False}))
+    assert enforce.is_satisfied(p)

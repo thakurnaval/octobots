@@ -30,12 +30,20 @@ from . import config
 log = logging.getLogger(__name__)
 
 
-def ensure_analytics_disabled(path: Path = config.SETTINGS_PATH) -> Path:
-    """Write `analyticsEnabled:false` to AgentCraft's settings.json,
-    preserving any other keys.
+def ensure_settings(path: Path = config.SETTINGS_PATH) -> Path:
+    """Write the settings octobots needs to AgentCraft's settings.json,
+    preserving any other keys the user has set.
 
-    Returns the path written. Idempotent: if analytics is already off,
-    rewrites with the same value (cheap, keeps the file canonical).
+    Settings written:
+      - `analyticsEnabled: false` — gates PostHog capture() inside AC.
+      - `projectFilter: false` — without this, AC filters our subscribed
+        sessions out (`sessionBelongsToProject` returns false for our
+        synthetic sessionId=role_id values, so AC won't create the
+        placeholder hero on the WS subscribe path).
+
+    Idempotent. Returns the path written. AC reads settings on startup,
+    so a runtime change requires AC restart OR the matching `POST
+    /settings/<key>` runtime endpoints (we use both — see sink.py).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -54,17 +62,29 @@ def ensure_analytics_disabled(path: Path = config.SETTINGS_PATH) -> Path:
             existing = {}
 
     existing["analyticsEnabled"] = False
+    existing["projectFilter"] = False
     path.write_text(json.dumps(existing, indent=2) + "\n")
-    log.info("agentcraft analytics disabled in %s", path)
+    log.info(
+        "agentcraft settings written: analyticsEnabled=False, "
+        "projectFilter=False (path=%s)", path,
+    )
     return path
 
 
+# Backwards-compatible alias — older callers used the analytics-only name.
+ensure_analytics_disabled = ensure_settings
+
+
 def is_satisfied(path: Path = config.SETTINGS_PATH) -> bool:
-    """Returns True iff `analyticsEnabled` is explicitly False on disk."""
+    """Returns True iff both required settings are correct on disk."""
     if not path.exists():
         return False
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return False
-    return isinstance(data, dict) and data.get("analyticsEnabled") is False
+    return (
+        isinstance(data, dict)
+        and data.get("analyticsEnabled") is False
+        and data.get("projectFilter") is False
+    )

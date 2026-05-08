@@ -100,6 +100,53 @@ octobots/scripts/monitor-bridge.sh    # same launcher /agentcraft uses
 PYTHONPATH=octobots python3 -m monitor.bridge
 ```
 
+## Why heroes appear at all (the load-bearing trick)
+
+AgentCraft's UI renders heroes from two sources only:
+
+1. **Internal heroes** spawned via `POST /internal-heroes/spawn` (AC manages the
+   Claude/Cursor subprocess itself).
+2. **External Claude Code sessions** detected by scanning
+   `~/.claude/projects/<slugify(cwd)>/` for `<session-id>.jsonl` transcript
+   files.
+
+Our supervisor roles are neither — they're tmux-paned Claude Code processes
+launched from per-role worker dirs, so their session JSONL files end up in
+*different* slug dirs that AC's scanner doesn't see. Naive `team_member_detected`
+events do not create heroes.
+
+The escape hatch — discovered by reading
+[`server/dist/index.js`](https://www.npmjs.com/package/@idosal/agentcraft) —
+is in AC's WebSocket subscribe handler:
+
+```js
+// when a WS subscribe arrives for an unknown sessionId
+if (!existing && !internalHero && !pendingSpawn && (sessionInProject || !projectFilter)) {
+    placeholder = { sessionId, name: ..., hasOpenTerminal: true, ... };
+    sessions.unshift(placeholder);
+    broadcast({type: "session_roster", sessions});
+}
+
+// elsewhere:
+hasOpenTerminal: activeListeners.has(sessionId) || eventOnlySessions.has(sessionId)
+```
+
+So the moment we WS-subscribe for `sessionId = role_id`, AC creates a
+placeholder hero with `hasOpenTerminal: true` and broadcasts a roster
+update — **as long as `projectFilter` is off**.
+
+The bridge handles this on every connect:
+
+1. `enforce.ensure_settings()` writes `projectFilter:false` to
+   `~/.agentcraft/settings.json` (alongside `analyticsEnabled:false`).
+2. After the `/health` probe succeeds, the sink hits
+   `POST /settings/project-filter {enabled:false}` to flip it in
+   AC's running memory too — no AC restart needed.
+3. Per-role `subscribe` over WS triggers AC's placeholder-creation path.
+
+Everything else — activity flicker, notice-board, notifications, hero
+customization, the inbound `user_prompt` channel — flows from there.
+
 ## Verify it works
 
 In the AgentCraft browser UI you should see, in order:
@@ -164,10 +211,12 @@ two ways:
    than triggering undici's hard-coded "bad port" rejection (which
    happens with low ports like `:1` and produces synchronous error
    spam — see Troubleshooting).
-2. **`enforce.ensure_analytics_disabled()`** writes
-   `analyticsEnabled: false` to `~/.agentcraft/settings.json` (preserving any
-   other keys you've set). This gates `capture()` calls inside the AC server
-   even when `launch.sh` isn't used.
+2. **`enforce.ensure_settings()`** writes
+   `analyticsEnabled: false` and `projectFilter: false` to
+   `~/.agentcraft/settings.json` (preserving any other keys you've set).
+   The first gates `capture()` calls inside the AC server even when
+   `launch.sh` isn't used; the second is what makes our bridge's heroes
+   render at all (see "Why heroes appear" above).
 
 The bridge probes `GET /settings` on first connect; if AC reports
 `analyticsEnabled` is anything other than `false`, you'll see:
@@ -320,6 +369,15 @@ Check `/status` for the PID, then `kill <pid>` and `/agentcraft` again.
 The supervisor only knows about the subprocess it spawned — if the bridge
 exited but the supervisor wasn't told (rare), it'll still think the proc
 is alive. `/agentcraft restart` also forces a clean cycle.
+
+**No heroes appear in the UI at all.**
+First check the bridge logs for `agentcraft projectFilter disabled at
+runtime`. If you don't see that, the runtime POST failed and AC is still
+filtering subscribes — restart AC so it picks up `projectFilter:false`
+from `~/.agentcraft/settings.json`. If you see the log line but heroes
+still don't appear, AC may be running in a mode that ignores the flag
+(e.g. `AGENTCRAFT_ALL_PROJECTS=1` env var locks the setting). Check
+`/settings` GET to confirm the live value.
 
 **Heroes appear but never change state.**
 Check the bridge's logs for events being dispatched. If the supervisor isn't

@@ -43,9 +43,11 @@ class FakeAC:
         self.captures: list[tuple[str, dict]] = []
         self.subscribed: list[str] = []
         self.ws_clients: list[web.WebSocketResponse] = []
+        self.project_filter: bool = True  # AC's default
         self.app = web.Application()
         self.app.router.add_get("/health", self._health)
         self.app.router.add_get("/settings", self._settings)
+        self.app.router.add_post("/settings/project-filter", self._project_filter)
         self.app.router.add_post("/event", self._event)
         self.app.router.add_post("/notice-board", self._notice_board)
         self.app.router.add_get("/", self._ws_or_root)
@@ -92,7 +94,15 @@ class FakeAC:
         return web.Response(text="OK")
 
     async def _settings(self, request):
-        return web.json_response({"analyticsEnabled": False})
+        return web.json_response({
+            "analyticsEnabled": False,
+            "projectFilter": self.project_filter,
+        })
+
+    async def _project_filter(self, request):
+        body = await request.json()
+        self.project_filter = bool(body.get("enabled", True))
+        return web.json_response({"enabled": self.project_filter})
 
     async def _event(self, request):
         body = await request.json()
@@ -212,6 +222,11 @@ async def test_e2e_replay_and_inbound(
         # Subscribe should have been sent over WS for the existing agent.
         ok = await _wait_for(lambda: "python-dev" in fake_ac.subscribed)
         assert ok, f"subscribe missing; subscribed={fake_ac.subscribed}"
+
+        # Sink should have flipped projectFilter off at runtime so AC
+        # creates placeholder heroes for our subscribed sessions.
+        ok = await _wait_for(lambda: fake_ac.project_filter is False)
+        assert ok, "projectFilter was not disabled by the sink"
 
         # Feed a MessageSentEvent — should produce a notice_board_message.
         await sink.handle(MessageSentEvent(

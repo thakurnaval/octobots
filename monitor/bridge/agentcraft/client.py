@@ -71,6 +71,25 @@ class AgentCraftClient:
             log.debug("get_settings failed: %s", e)
             return None
 
+    async def disable_project_filter(self) -> bool:
+        """Flip projectFilter off at runtime (no AC restart needed).
+
+        Without this, AC filters our subscribed sessions out — its
+        `sessionBelongsToProject` check looks for a JSONL transcript
+        file at ~/.claude/projects/<slug>/<sessionId>.jsonl, which
+        doesn't exist for our synthetic sessionId=role_id values.
+
+        Returns True on 2xx, False otherwise.
+        """
+        try:
+            status = await asyncio.to_thread(
+                self._sync_post, "/settings/project-filter", {"enabled": False},
+            )
+            return 200 <= status < 300
+        except Exception as e:
+            log.warning("disable_project_filter failed: %s", e)
+            return False
+
     def _sync_get_ok(self, path: str) -> bool:
         try:
             with urllib.request.urlopen(
