@@ -45,10 +45,8 @@ load_dotenv(Path.cwd() / ".env.octobots")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 
-# Strip whitespace + trailing slash — a copy-paste from
-# https://api.telegram.org/bot<TOKEN>/ otherwise breaks every URL we build.
-TG_TOKEN = os.environ.get("OCTOBOTS_TG_TOKEN", "").strip().rstrip("/")
-TG_OWNER = os.environ.get("OCTOBOTS_TG_OWNER", "").strip().rstrip("/")
+TG_TOKEN = os.environ.get("OCTOBOTS_TG_TOKEN", "")
+TG_OWNER = os.environ.get("OCTOBOTS_TG_OWNER", "")
 TMUX_SESSION = os.environ.get("OCTOBOTS_TMUX", "octobots")
 DEFAULT_ROLE = (
     os.environ.get("OCTOBOTS_DEFAULT_ROLE")
