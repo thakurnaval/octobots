@@ -92,6 +92,7 @@ Thumbs.db
 .playwright-mcp/
 .octobots/
 .claude/image-cache/
+
 # ── What IS tracked ─────────────────────────────────────────────────────────
 # roles/*/SOUL.md        — personality (versioned)
 # roles/*/CLAUDE.md      — instructions (versioned)

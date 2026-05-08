@@ -155,6 +155,28 @@ def _preview(text: str, role: str) -> str:
     return f"[{role}] {head}"
 
 
+def _log_notify(role: str, channel: str, method: str, text: str) -> None:
+    """Append one JSONL line per notification for the supervisor monitor bridge.
+
+    Fail-open: any failure here must not break the actual notification path.
+    """
+    try:
+        root = _project_root() or Path.cwd()
+        log_path = root / ".octobots" / "notify.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": time.time(),
+            "from": role,
+            "channel": channel,
+            "method": method,
+            "preview": (text or "")[:200],
+        }
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, separators=(",", ":")) + "\n")
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -177,11 +199,15 @@ def send_notification(
     Returns:
         dict with at least a "status" key: "sent", "skipped", or "error".
     """
+    role = _from_role(from_role)
+    # Log notify intent before checking credentials so the supervisor monitor
+    # bridge sees the wave even when Telegram is unconfigured (skipped) or fails.
+    _log_notify(role, "telegram", "file" if file else "message", message)
+
     creds = credentials()
     if not creds:
         return {"status": "skipped", "reason": "Telegram not configured"}
     token, chat = creds
-    role = _from_role(from_role)
 
     # File attachment path
     if file:
