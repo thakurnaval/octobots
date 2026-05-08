@@ -9,11 +9,23 @@
 #
 # JS treats empty strings as falsy, so `POSTHOG_API_KEY=""` falls
 # through to the baked key. We set non-empty bogus values to actually
-# override, plus point POSTHOG_HOST and SUPABASE_URL at unreachable
-# loopback addresses so any latent client init can't reach a real
-# server. The Octobots bridge additionally writes
-# ~/.agentcraft/settings.json with `analyticsEnabled:false`; this
-# script is belt-and-braces.
+# override, plus point POSTHOG_HOST and SUPABASE_URL at hosts that
+# fail at DNS resolution (`*.invalid` is reserved by RFC 2606 — never
+# resolves) so any latent client init can't reach a real server. The
+# Octobots bridge additionally writes ~/.agentcraft/settings.json with
+# `analyticsEnabled:false`; this script is belt-and-braces.
+#
+# IMPORTANT: don't use port 1 (or 7, 9, 11, 13, 15, 17, 19, 21, 22, 23,
+# 25, 53, 110, 143, 6000, etc.) — they're on undici's hard-coded fetch
+# block-list and produce a synchronous "Error: bad port" on every
+# attempt, which spams the AC log on each WebSocket connect. A
+# `.invalid` host fails as a normal network error, which the AC auth
+# manager handles silently.
+#
+# If you still see token-validation spam after switching to this
+# launcher, AC's browser tab has a cached Supabase session from an
+# earlier run. Open AC in the browser, sign out, refresh — the spam
+# stops because the browser no longer sends a token to validate.
 #
 # Usage:
 #   octobots/monitor/bridge/agentcraft/launch.sh
@@ -23,7 +35,7 @@
 set -euo pipefail
 
 POSTHOG_API_KEY="${POSTHOG_API_KEY:-disabled-by-octobots}" \
-POSTHOG_HOST="${POSTHOG_HOST:-http://127.0.0.1:1}" \
-SUPABASE_URL="${SUPABASE_URL:-http://127.0.0.1:1}" \
+POSTHOG_HOST="${POSTHOG_HOST:-https://posthog.disabled-by-octobots.invalid}" \
+SUPABASE_URL="${SUPABASE_URL:-https://supabase.disabled-by-octobots.invalid}" \
 SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-disabled-by-octobots}" \
 exec npx -y @idosal/agentcraft "$@"

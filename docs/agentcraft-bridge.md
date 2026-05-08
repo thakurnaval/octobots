@@ -285,6 +285,20 @@ The reconnect loop uses 1s/2s/5s/10s/30s backoff. If you see this in steady
 state, either AC's WS is unstable (look at AC's own logs) or a proxy/firewall
 is in the way.
 
+**AC's log spams `[Auth] Token validation failed: fetch failed`.**
+AC's browser tab has a cached Supabase session from a prior run, and on
+every WebSocket connect AC tries to validate that cached token via the
+Supabase URL. With our launcher pointing Supabase at a `.invalid` host, the
+fetch fails as a normal network error which AC handles, but it does log it
+once per connect. Fix: open AC in your browser → sign out → refresh. The
+browser stops sending the cached token and the spam stops.
+
+If you ever see `Error: bad port` instead, your environment overrode
+`SUPABASE_URL`/`POSTHOG_HOST` to a port on undici's
+[block-list](https://fetch.spec.whatwg.org/#port-blocking) (1, 7, 9, 11, 13,
+…). Use a `.invalid` host (or any non-blocked port) instead — `launch.sh`
+already does.
+
 ## Tests
 
 ```bash
