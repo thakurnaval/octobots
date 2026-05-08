@@ -25,14 +25,39 @@ the translation table in `agentcraft/translate.py` was reverse-engineered from
 the published bundle. A version bump can rename event types without notice; if
 the UI suddenly stops rendering, that's the first place to look.
 
+## Updating an existing install
+
+If `octobots/` is already installed in your project from a prior version,
+pick up the bridge changes (and any other framework updates) with:
+
+```bash
+# From your target project root
+octobots/update.sh
+# or, if you don't have a current update.sh:
+curl -fsSL https://raw.githubusercontent.com/arozumenko/octobots/main/update.sh | bash
+
+# New runtime dep — install if you haven't:
+pip install -r octobots/scripts/requirements.txt
+```
+
+`update.sh` does a SHA-manifest-aware in-place replace of `./octobots/`
+and **never** touches `.env.octobots`, `.octobots/relay.db`,
+`.claude/agents/`, or `.mcp.json`. Pass `--dry-run` first if you want to
+see what would change. Pass `--force` if you've hand-edited inside
+`octobots/` (drift protection refuses by default).
+
+After updating, `/agentcraft` becomes available in the supervisor REPL.
+
 ## Connect it
 
-Three shells, in order:
+Two shells. The bridge runs **inside the supervisor** as a managed
+subprocess (mirroring how `/bridge` runs the Telegram bridge), so you
+don't need a third terminal for it.
 
 ```bash
 # 1. Start AgentCraft with telemetry endpoints clobbered.
 #    Opens AgentCraft in your default browser at http://localhost:2468.
-supervisor/monitor/bridge/agentcraft/launch.sh
+octobots/monitor/bridge/agentcraft/launch.sh
 ```
 
 ```bash
@@ -41,14 +66,20 @@ cd /path/to/your/project
 python3 octobots/scripts/supervisor.py
 ```
 
-```bash
-# 3. In a third shell, from your target project, start the bridge.
-#    It tails relay.db / tmux panes / notify.log and forwards to AC.
-cd /path/to/your/project
-python3 -m monitor.bridge
+Then in the supervisor REPL:
+
+```
+> /agentcraft           # start the bridge as a background subprocess
+> /status                # see "agentcraft bridge: running"
+> /agentcraft restart    # stop + relaunch
 ```
 
-The bridge boots into a probe loop until AgentCraft is reachable, then logs:
+The bridge probes `http://localhost:2468` until AC is reachable, so
+launching it before AgentCraft is up is fine — order between shells
+1 and 2 doesn't matter.
+
+Looking at the bridge's stderr (it's not mirrored to the supervisor TUI;
+the launcher routes stdout/stderr to `DEVNULL`), it logs roughly:
 
 ```
 agentcraft analytics disabled in /Users/<you>/.agentcraft/settings.json
@@ -57,6 +88,16 @@ agentcraft reachable at http://localhost:2468
 agentcraft analytics confirmed off
 agentcraft replay: N agents
 agentcraft ws connected: ws://localhost:2468
+```
+
+If you want to see those logs interactively (e.g. for debugging), run
+the bridge standalone instead of via `/agentcraft`:
+
+```bash
+cd /path/to/your/project
+octobots/scripts/monitor-bridge.sh    # same launcher /agentcraft uses
+# or directly:
+PYTHONPATH=octobots python3 -m monitor.bridge
 ```
 
 ## Verify it works
@@ -114,10 +155,15 @@ Supabase URL** baked into `server/dist/build-env.json`. We disable telemetry
 two ways:
 
 1. **`launch.sh`** sets `POSTHOG_API_KEY=disabled-by-octobots`,
-   `POSTHOG_HOST=http://127.0.0.1:1`, `SUPABASE_URL=http://127.0.0.1:1`,
+   `POSTHOG_HOST=https://posthog.disabled-by-octobots.invalid`,
+   `SUPABASE_URL=https://supabase.disabled-by-octobots.invalid`,
    `SUPABASE_ANON_KEY=disabled-by-octobots`. Non-empty values short-circuit
-   the build-env fallback (`process.env.X || build_env.X`); bogus loopback
-   hosts mean any latent client init can't reach a real server.
+   the build-env fallback (`process.env.X || build_env.X`); the
+   `.invalid` TLD is reserved by RFC 2606 and never resolves, so any
+   latent client init fails at DNS as a normal network error rather
+   than triggering undici's hard-coded "bad port" rejection (which
+   happens with low ports like `:1` and produces synchronous error
+   spam — see Troubleshooting).
 2. **`enforce.ensure_analytics_disabled()`** writes
    `analyticsEnabled: false` to `~/.agentcraft/settings.json` (preserving any
    other keys you've set). This gates `capture()` calls inside the AC server
@@ -177,6 +223,9 @@ monitor/bridge/
     ├── enforce.py     # ~/.agentcraft/settings.json writer
     ├── launch.sh      # AC launcher with telemetry env clobbered
     └── config.py      # AC-specific env vars
+
+scripts/
+└── monitor-bridge.sh  # PYTHONPATH wrapper used by `/agentcraft`
 ```
 
 ## Wire protocol summary
@@ -262,8 +311,15 @@ Inbound (AC → bridge, over WS):
 ## Troubleshooting
 
 **Bridge stays in `waiting for agentcraft at http://localhost:2468`.**
-AgentCraft isn't running. Start it with `launch.sh`. Or AC is on a different
-port — set `OCTOBOTS_AGENTCRAFT_URL`.
+AgentCraft isn't running. Start it with `octobots/monitor/bridge/agentcraft/launch.sh`.
+Or AC is on a different port — set `OCTOBOTS_AGENTCRAFT_URL` and
+`/agentcraft restart` in the supervisor REPL.
+
+**`/agentcraft` says "already running" but the bridge isn't actually working.**
+Check `/status` for the PID, then `kill <pid>` and `/agentcraft` again.
+The supervisor only knows about the subprocess it spawned — if the bridge
+exited but the supervisor wasn't told (rare), it'll still think the proc
+is alive. `/agentcraft restart` also forces a clean cycle.
 
 **Heroes appear but never change state.**
 Check the bridge's logs for events being dispatched. If the supervisor isn't
