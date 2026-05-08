@@ -149,7 +149,7 @@ The Agent tool spawns sub-agents in YOUR context window. Taskbox sends messages 
 other roles running in their OWN tmux panes with their OWN context.
 
 **Use the Agent tool for:**
-- Lightweight sub-tasks that belong to YOUR role (taskbox-listener, issue-reproducer, rca-investigator)
+- Lightweight sub-tasks that belong to YOUR role (issue-reproducer, rca-investigator)
 - Tasks that need YOUR context (reading files you already loaded, analyzing something you're looking at)
 
 **Use taskbox for:**

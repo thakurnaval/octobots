@@ -560,7 +560,7 @@ async def run_bot() -> None:
                 "<code>/schedule every 30m @pm Check tasks</code>\n"
                 "<code>/schedule at 15:00 @py Review PR</code>\n"
                 "<code>/schedule every 1h run git fetch</code>\n"
-                "<code>/schedule every 10m agent taskbox-listener Check inbox</code>\n"
+                "<code>/schedule every 30m agent rca-investigator Check flaky tests</code>\n"
                 "<code>/schedule cron 0 9 * * MON-FRI @ba Standup</code>\n",
             )
             return
@@ -639,7 +639,7 @@ async def run_bot() -> None:
                 "<b>Loop</b> (shortcut for <code>/schedule every</code>)\n\n"
                 "<code>/loop 30m @pm Check tasks</code>\n"
                 "<code>/loop 5m run ./health-check.sh</code>\n"
-                "<code>/loop 10m agent taskbox-listener Check inbox</code>\n",
+                "<code>/loop 30m agent rca-investigator Check flaky tests</code>\n",
             )
             return
         # Reuse schedule handler with "every" prepended

@@ -106,10 +106,10 @@ tech-lead role on a 7B model and expect it to write production-ready epics.
 - **First launch downloads tens of GB.** Pull the model ahead of time with
   `ollama pull <tag>` so the first agent boot isn't a 20-minute wait.
 - **Octobots subagents inherit the same model.** When a role spawns a
-  subagent (e.g. PM delegating to `taskbox-listener`), the subagent runs on
-  the *same* local model — multiplying its latency. If you orchestrate
-  heavily with subagents, keep the orchestrator on cloud Claude and put
-  the leaf workers on local models.
+  subagent (e.g. tech-lead delegating to `rca-investigator`), the subagent
+  runs on the *same* local model — multiplying its latency. If you
+  orchestrate heavily with subagents, keep the orchestrator on cloud
+  Claude and put the leaf workers on local models.
 - **Telegram + GitHub bridges are unaffected.** They don't go through the
   LLM at all — they're shell scripts reading env vars.
 

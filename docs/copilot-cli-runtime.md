@@ -75,10 +75,10 @@ instead of `claude --agent ba --dangerously-skip-permissions`. Roles without a
    Playwright / GitHub / Context7 / Tavily / Lighthouse MCPs from `.mcp.json`
    will need to be added to each Copilot agent's frontmatter (or a shared
    `$COPILOT_HOME/mcp.json`) manually.
-3. **Subagents.** Roles that delegate via the `Agent` tool (e.g. PM spawning
-   `taskbox-listener`, scout calling `Explore`) will not work as Copilot
-   roles, because Copilot CLI doesn't expose an equivalent subagent
-   primitive. Keep these on Claude.
+3. **Subagents.** Roles that delegate via the `Agent` tool (e.g. tech-lead
+   spawning `rca-investigator`, scout calling `Explore`) will not work as
+   Copilot roles, because Copilot CLI doesn't expose an equivalent
+   subagent primitive. Keep these on Claude.
 4. **Skills system.** Octobots' `skills/` directory is symlinked into
    `.claude/skills/` for each Claude worker. Copilot has its own `SKILL.md`
    spec and a different lookup path. Most octobots "skills" are really

@@ -408,7 +408,7 @@ class Scheduler:
     def _exec_agent(self, job: ScheduledJob) -> str:
         """Invoke a Claude Code agent as a subprocess.
 
-        target = agent name (e.g. "taskbox-listener")
+        target = agent name (e.g. "rca-investigator")
         content = prompt to send to the agent
         """
         agent_dir = resolve_agent(job.target, self.octobots_dir, self.runtime_dir)

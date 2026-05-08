@@ -108,7 +108,7 @@ The supervisor runs jobs on a schedule — same `@role` syntax as Telegram. No L
 /schedule at 15:00 @py Review PR #42
 /schedule cron 0 9 * * MON-FRI @ba Daily standup report
 /schedule every 1h run git fetch --all
-/schedule every 10m agent taskbox-listener Check inbox
+/schedule every 30m agent rca-investigator Check flaky tests
 
 /loop 30m @qa Run regression tests       # shortcut for /schedule every
 

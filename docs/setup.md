@@ -105,7 +105,7 @@ The supervisor can run jobs on a schedule — send messages to workers, run shel
 /schedule every 1h run git fetch --all
 
 # Invoke a Claude Code agent
-/schedule every 10m agent taskbox-listener Check inbox
+/schedule every 30m agent rca-investigator Check flaky tests
 
 # /loop is a shortcut for /schedule every
 /loop 30m @pm Check task progress

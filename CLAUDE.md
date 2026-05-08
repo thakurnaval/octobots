@@ -147,9 +147,13 @@ Bundled skills (still in this repo):
 - `project-seeder` — scout's project configuration skill
 
 Shared agents in `shared/agents/`:
-- `taskbox-listener` — long-running inbox poller
 - `issue-reproducer` — reproduces GitHub issues
 - `rca-investigator` — root cause analysis
+
+Note: the supervisor's main loop polls the taskbox directly (default 15 s)
+and dispatches via tmux send-keys, so no per-role inbox-listener subagent
+is needed. Operations on `relay.py` are exposed via the `taskbox` skill,
+not a separate agent.
 
 ### Worker Environments
 

@@ -2332,7 +2332,6 @@ class Supervisor:
             "  /schedule every 30m @pm Check status of all tasks\n"
             "  /schedule at 15:00 @py Review PR #42\n"
             "  /schedule every 1h run git fetch --all\n"
-            "  /schedule every 10m agent taskbox-listener Check inbox\n"
             "  /schedule cron 0 9 * * MON-FRI @ba Daily standup report\n\n"
             "  /loop 30m @pm Check task progress\n"
             "  /loop 5m run ./scripts/health-check.sh\n"

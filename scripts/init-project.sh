@@ -419,9 +419,10 @@ Rules:
 **NEVER use the Claude Code Agent tool to do another role's work.**
 
 You have access to other agents in .claude/agents/, but those are for
-lightweight sub-tasks within YOUR own context (e.g., taskbox-listener for inbox
-polling, issue-reproducer for bug repro). They are NOT a substitute for
-sending work through taskbox to the actual role running in its own tmux pane.
+lightweight sub-tasks within YOUR own context (e.g., issue-reproducer for
+bug repro, rca-investigator for root-cause analysis). They are NOT a
+substitute for sending work through taskbox to the actual role running in
+its own tmux pane.
 
 **To assign work to another role, use taskbox:**
 \`\`\`bash

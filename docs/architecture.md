@@ -187,7 +187,7 @@ roles/python-dev/
     │   ├── git-workflow → ../../../skills/git-workflow
     │   └── ...
     └── agents/
-        └── taskbox-listener → ../../../shared/agents/taskbox-listener
+        └── rca-investigator → ../../../shared/agents/rca-investigator
 ```
 
 - **AGENT.md** loaded via `claude --agent <role>` — frontmatter sets identity (name shown in prompt), body is the role's technical instructions
