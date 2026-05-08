@@ -2209,6 +2209,17 @@ class Supervisor:
         bridge_alive = hasattr(self, "_bridge_proc") and self._bridge_proc and self._bridge_proc.poll() is None
         table.add_row("telegram bridge", "[green]running[/green]" if bridge_alive else "[dim]not started (/bridge)[/dim]")
 
+        # agentcraft bridge
+        ac_alive = (
+            hasattr(self, "_agentcraft_proc")
+            and self._agentcraft_proc
+            and self._agentcraft_proc.poll() is None
+        )
+        table.add_row(
+            "agentcraft bridge",
+            "[green]running[/green]" if ac_alive else "[dim]not started (/agentcraft)[/dim]",
+        )
+
         # pending messages
         pending = self.taskbox.pending_count()
         table.add_row("pending tasks", f"[yellow]{pending}[/yellow]" if pending else "[green]0[/green]")
@@ -2260,6 +2271,52 @@ class Supervisor:
             stderr=subprocess.DEVNULL,
         )
         console.print(f"[green]✓ Telegram bridge started (PID: {self._bridge_proc.pid})[/green]")
+
+    def cmd_agentcraft(self, restart: bool = False) -> None:
+        """Start or restart the AgentCraft bridge as a background process.
+
+        Tails relay.db / tmux panes / notify.log and forwards events to a
+        locally-running `npx @idosal/agentcraft` server. The bridge probes
+        the AC server until it's reachable, so launching it before AC is
+        up is fine.
+        """
+        if (
+            hasattr(self, "_agentcraft_proc")
+            and self._agentcraft_proc
+            and self._agentcraft_proc.poll() is None
+        ):
+            if not restart:
+                console.print(
+                    f"[yellow]AgentCraft bridge already running "
+                    f"(PID: {self._agentcraft_proc.pid}). Use /agentcraft restart[/yellow]"
+                )
+                return
+            self._agentcraft_proc.terminate()
+            self._agentcraft_proc.wait(timeout=5)
+            console.print("[yellow]AgentCraft bridge stopped.[/yellow]")
+
+        launcher = SCRIPT_DIR / "monitor-bridge.sh"
+        if not launcher.is_file():
+            console.print(f"[red]{launcher} not found[/red]")
+            return
+
+        env = {**os.environ, "OCTOBOTS_PROJECT_ROOT": str(PROJECT_DIR)}
+        self._agentcraft_proc = subprocess.Popen(
+            ["bash", str(launcher)],
+            cwd=str(PROJECT_DIR),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        ac_launch = OCTOBOTS_DIR / "monitor" / "bridge" / "agentcraft" / "launch.sh"
+        console.print(
+            f"[green]✓ AgentCraft bridge started (PID: {self._agentcraft_proc.pid})[/green]"
+        )
+        console.print(
+            "[dim]The bridge will probe http://localhost:2468 until AgentCraft "
+            "is reachable.\n"
+            f"Start AgentCraft itself with: {ac_launch}[/dim]"
+        )
 
     def _parse_schedule_target(self, rest: list[str]) -> tuple[str, str, str] | None:
         """Parse the target portion of a schedule/loop command.
@@ -2512,6 +2569,7 @@ class Supervisor:
             ("/resume <role>", "Resume silence healthcheck manually"),
             ("/board", "Show team board"),
             ("/bridge", "Start Telegram bridge (background)"),
+            ("/agentcraft [restart]", "Start AgentCraft bridge (background)"),
             ("/health", "System health check"),
             ("/schedule <type> <spec> @role msg", "Schedule a job (at/every/cron)"),
             ("/loop <interval> @role msg", "Shortcut for /schedule every"),
@@ -2583,6 +2641,8 @@ class Supervisor:
             self.cmd_board()
         elif cmd == "/bridge":
             self.cmd_bridge(restart="restart" in args)
+        elif cmd == "/agentcraft":
+            self.cmd_agentcraft(restart="restart" in args)
         elif cmd == "/health":
             self.cmd_health()
         elif cmd == "/schedule":
