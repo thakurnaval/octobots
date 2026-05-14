@@ -485,6 +485,19 @@ def build_app(
             {"task_id": msg_id, "recipient": "@supervisor"}, status=201,
         )
 
+    # CORS preflight (OPTIONS) — browsers send these before POSTs that
+    # carry `Content-Type: application/json`. Without an explicit handler
+    # aiohttp's router returns 405 with no CORS headers and the browser
+    # rejects the actual request. A catch-all `{path:.*}` route + Allow
+    # headers covers every endpoint at once.
+    async def cors_preflight(_: web.Request) -> web.Response:
+        r = web.Response(status=204)
+        _cors(r)
+        r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        r.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        r.headers["Access-Control-Max-Age"] = "600"
+        return r
+
     app = web.Application()
     app[STATE_KEY] = state
     app.router.add_get("/healthz", healthz)
@@ -502,6 +515,7 @@ def build_app(
     app.router.add_get("/supervisor/jobs", get_jobs)
     app.router.add_get("/supervisor/houses", get_houses)
     app.router.add_post("/supervisor/command", post_command)
+    app.router.add_route("OPTIONS", "/{path:.*}", cors_preflight)
     return app
 
 
