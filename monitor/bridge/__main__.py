@@ -1,28 +1,31 @@
 """Entry point — `python3 -m monitor.bridge` from the supervisor/ directory.
 
-Wires the three source pollers into a single AgentCraftSink. Sources call
-`sink.handle(event)` on every change; the sink fans out to
-http://localhost:2468 (the locally-running `npx @idosal/agentcraft`).
+Tails `.octobots/relay.db`, `.octobots/.pane-map` (tmux), and
+`.octobots/notify.log`; mirrors per-task activity into
+`.agents/transcripts/<role>/` and serves the HTTP+WS endpoint at
+http://127.0.0.1:2469 that the monitor UI (and any other consumer)
+talks to.
 """
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import time
-from pathlib import Path
+from datetime import datetime, timezone
 
-from . import config
-from .agentcraft.sink import AgentCraftSink
-from .events import Space
 from .sources.notify_log import NotifyLogTailer
 from .sources.taskbox import TaskboxPoller
 from .sources.tmux_panes import TmuxPanePoller
 from .state import WorldState
+from .transcripts import TranscriptSink
+from .transcripts_http import TranscriptsHttpServer
 
 
-def _space_id(db_path: Path) -> str:
-    return hashlib.sha256(str(db_path).encode()).hexdigest()[:12]
+def _session_id(started_at: float) -> str:
+    """ISO-compact UTC stamp; matches the iso_compact prefix on archive files."""
+    return datetime.fromtimestamp(started_at, tz=timezone.utc).strftime(
+        "%Y%m%dT%H%M%SZ",
+    )
 
 
 async def main() -> None:
@@ -32,25 +35,46 @@ async def main() -> None:
     )
     log = logging.getLogger("bridge")
 
-    space = Space(
-        id=_space_id(config.RELAY_DB),
-        name=config.PROJECT_ROOT.name,
-        path=str(config.PROJECT_ROOT),
-        started_at=time.time(),
-    )
+    started_at = time.time()
     world = WorldState()
-    sink = AgentCraftSink(world=world, space=space)
-    await sink.start()
 
-    sources = [
-        TaskboxPoller(sink.handle, world),
-        TmuxPanePoller(sink.handle, world),
-        NotifyLogTailer(sink.handle, world),
+    # HTTP+WS server fronts the transcript files. Constructed first so we
+    # can wire its `broadcast` method into the sink as the on_event callback
+    # — captured as a bound method, so it stays valid across start/stop.
+    http_server = TranscriptsHttpServer()
+
+    # session_id identifies this bridge process's run. Same value lands in
+    # every role's session.json so a consumer can tell which transcripts
+    # belong to the same supervisor session.
+    sinks = [
+        TranscriptSink(
+            session_id=_session_id(started_at),
+            on_event=http_server.broadcast,
+        ),
     ]
 
-    log.info("space: id=%s name=%s path=%s", space.id, space.name, space.path)
+    for s in sinks:
+        await s.start()
+    await http_server.start()
+
+    async def emit(event):
+        # Fan-out: each event reaches every sink. Errors in one sink
+        # don't poison the others — they're isolated per gather slot.
+        await asyncio.gather(
+            *(s.handle(event) for s in sinks),
+            return_exceptions=True,
+        )
+
+    sources = [
+        TaskboxPoller(emit, world),
+        TmuxPanePoller(emit, world),
+        NotifyLogTailer(emit, world),
+    ]
+
+    log.info("bridge started: session=%s", _session_id(started_at))
     await asyncio.gather(
-        sink.run(),
+        *(s.run() for s in sinks),
+        http_server.run(),
         *(s.run() for s in sources),
     )
 

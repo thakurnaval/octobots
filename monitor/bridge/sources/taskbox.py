@@ -127,6 +127,7 @@ class TaskboxPoller:
                 recipient=r["recipient"],
                 preview=snap.preview,
                 created_at=r["created_at"],
+                content=r["content"],
             ))
         elif old_status != new_status:
             if old_status == "pending" and new_status == "processing":
@@ -135,11 +136,13 @@ class TaskboxPoller:
                     sender=r["sender"],
                     recipient=r["recipient"],
                     preview=snap.preview,
+                    content=r["content"],
                 ))
             elif old_status == "processing" and new_status == "done":
                 await self.emit(MessageDoneEvent(
                     msg_id=msg_id, recipient=r["recipient"],
                     response_preview=_preview(r["response"]),
+                    response=r["response"],
                 ))
 
         self._status[msg_id] = new_status

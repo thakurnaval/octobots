@@ -18,7 +18,7 @@ python3 octobots/scripts/check-spawn-ready.py --check files-only
 bash -n octobots/scripts/*.sh
 
 # Install Python dependencies
-pip install -r octobots/scripts/requirements.txt
+pip install -r octobots/requirements.txt
 
 # Start a single role (interactive, from project root)
 octobots/start.sh scout

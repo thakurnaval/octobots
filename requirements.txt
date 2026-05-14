@@ -1,11 +1,18 @@
-# Octobots dependencies
-# Core (taskbox, relay) has zero deps — Python stdlib only
-# These are for the supervisor, bridges, and auth
+# Octobots dependencies — the single canonical install file.
+# Core (taskbox, relay) has zero deps — Python stdlib only.
+# Everything below is for the supervisor, bridges, and auth.
+#
+#     pip install -r supervisor/requirements.txt
 
 rich>=13.0                  # Supervisor TUI
 python-dotenv>=1.0          # .env.octobots loading
 cryptography>=41.0          # GitHub App JWT signing
 python-telegram-bot>=21.0   # Telegram bridge (optional)
+websockets>=10.0            # Monitor bridge — used by transcripts_http WS handler
+aiohttp>=3.9                # Monitor bridge — HTTP+WS server on :2469
+watchdog>=4.0               # File watchers used by some scripts
+mcp>=1.0                    # MCP server bindings (notify, etc.)
+pyyaml>=6.0                 # AGENT.md frontmatter + roles-manifest parsing
 
 # Firebase bridge (optional) — install separately if using the Firebase bridge:
 # pip install firebase-admin>=6.5.0 google-cloud-firestore>=2.16.0 google-cloud-storage>=2.17.0 httpx>=0.27.0

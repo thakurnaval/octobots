@@ -1,8 +1,8 @@
 """In-memory world state — agents + recent message buffer.
 
-Single mutator (the source pollers), single consumer (the AgentCraft sink
-on startup, for replaying current agents as team members). Sources update
-it as they observe real events.
+Mutated by the source pollers. Sinks may snapshot it (e.g. for replay
+on startup). Kept as the bridge's single in-process view of "who's here
+and what was recently said."
 """
 from __future__ import annotations
 

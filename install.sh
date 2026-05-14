@@ -112,7 +112,7 @@ cp -r "$SRC" "./$DEST"
 
 echo ""
 echo "Installing Python dependencies..."
-REQS="$DEST/scripts/requirements.txt"
+REQS="$DEST/requirements.txt"
 PIP_ERR="$TMP_DIR/pip-err.txt"
 if [[ -d "venv" ]]; then
     echo "  Using existing venv/"
@@ -136,7 +136,7 @@ elif command -v pip3 &>/dev/null; then
 elif command -v pip &>/dev/null; then
     pip install -q -r "$REQS" || echo "  ⚠  pip install failed"
 else
-    echo "  ⚠  pip not found — run: pip install -r octobots/scripts/requirements.txt"
+    echo "  ⚠  pip not found — run: pip install -r octobots/requirements.txt"
 fi
 
 # ── Select and install agents (BEFORE skills, so skills can be derived) ──────

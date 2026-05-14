@@ -10,7 +10,7 @@
 
 ```bash
 # Install Python deps (first time)
-pip install -r octobots/scripts/requirements.txt
+pip install -r octobots/requirements.txt
 ```
 
 ## Installation
@@ -174,7 +174,7 @@ OCTOBOTS_TG_OWNER=123456789
 ### 4. Run the bridge
 
 ```bash
-pip install -r octobots/scripts/requirements.txt  # first time
+pip install -r octobots/requirements.txt  # first time
 python3 octobots/scripts/telegram-bridge.py
 ```
 

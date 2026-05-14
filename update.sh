@@ -237,9 +237,9 @@ echo ""
 
 echo "Refreshing dependencies..."
 if command -v pip3 &>/dev/null; then
-    pip3 install -q -r "$DEST/scripts/requirements.txt" || warn "pip install failed"
+    pip3 install -q -r "$DEST/requirements.txt" || warn "pip install failed"
 elif command -v pip &>/dev/null; then
-    pip install -q -r "$DEST/scripts/requirements.txt" || warn "pip install failed"
+    pip install -q -r "$DEST/requirements.txt" || warn "pip install failed"
 fi
 ok "python deps"
 

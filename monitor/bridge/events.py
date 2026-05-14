@@ -15,14 +15,6 @@ AgentStateLiteral = Literal[
 
 
 @dataclass
-class Space:
-    id: str
-    name: str
-    path: str
-    started_at: float
-
-
-@dataclass
 class AgentSnapshot:
     id: str
     role: str
@@ -69,6 +61,7 @@ class MessageSentEvent:
     recipient: str
     preview: str
     created_at: float
+    content: str | None = None  # full body; sinks needing fidelity (transcripts) read this
 
 
 @dataclass
@@ -77,6 +70,7 @@ class MessageClaimedEvent:
     sender: str
     recipient: str
     preview: str
+    content: str | None = None
 
 
 @dataclass
@@ -84,6 +78,7 @@ class MessageDoneEvent:
     msg_id: str
     recipient: str
     response_preview: str
+    response: str | None = None  # full response body; preview-only sinks ignore this
 
 
 @dataclass

@@ -1356,6 +1356,10 @@ class Supervisor:
         except Exception as e:
             console.print(f"[red]Scheduler error: {e}[/red]")
 
+        # Pick up REPL slash commands sent in from the monitor UI
+        # (POST /supervisor/command → relay.db row addressed to @supervisor).
+        self._poll_supervisor_commands()
+
         # Check for restart requests from workers
         self._poll_restart_requests()
 
@@ -1382,6 +1386,51 @@ class Supervisor:
 
         # Keep board Active Work section current
         self._write_active_work()
+
+    def _poll_supervisor_commands(self) -> None:
+        """Drain commands enqueued by the monitor UI (recipient `@supervisor`).
+
+        The bridge's `POST /supervisor/command` endpoint inserts each
+        command as a pending taskbox row. Here we claim each one, run it
+        through the REPL command handler, and mark it done with the
+        captured Rich console output as the response. Any exception is
+        swallowed so a bad command from the UI can't take down the loop.
+        """
+        try:
+            msgs = self.taskbox.inbox("@supervisor", limit=10)
+        except Exception:
+            return
+        for msg in msgs:
+            msg_id = msg["id"]
+            content = (msg["content"] or "").strip()
+            if not content or not self.taskbox.claim(msg_id):
+                continue
+            response = ""
+            try:
+                # handle_command returns False to exit; we ignore the return
+                # because the UI shouldn't be able to kill the supervisor.
+                self.handle_command(content)
+                response = f"executed: {content}"
+                console.print(
+                    f"[magenta]⌘[/magenta] @supervisor: {content} ({msg_id[:8]})"
+                )
+            except Exception as e:
+                response = f"error: {e}"
+                console.print(
+                    f"[red]⌘ @supervisor command failed: {content} → {e}[/red]"
+                )
+            # Mark the row done so it doesn't replay. Sender will see the
+            # response delivered the next time _deliver_responses runs.
+            try:
+                conn = self.taskbox._db()
+                conn.execute(
+                    "UPDATE messages SET status='done', response=?, updated_at=? WHERE id=?",
+                    (response[:500], time.time(), msg_id),
+                )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                console.print(f"[red]failed to ack @supervisor msg {msg_id}: {e}[/red]")
 
     def _deliver_responses(self) -> None:
         """Deliver ack responses back to the original sender."""
@@ -2209,15 +2258,35 @@ class Supervisor:
         bridge_alive = hasattr(self, "_bridge_proc") and self._bridge_proc and self._bridge_proc.poll() is None
         table.add_row("telegram bridge", "[green]running[/green]" if bridge_alive else "[dim]not started (/bridge)[/dim]")
 
-        # agentcraft bridge
-        ac_alive = (
-            hasattr(self, "_agentcraft_proc")
-            and self._agentcraft_proc
-            and self._agentcraft_proc.poll() is None
+        # data bridge (Python; tails relay.db, serves HTTP+WS on :2469)
+        bridge_alive = self._bridge_alive()
+        bridge_mode = getattr(self, "_bridge_mode", None)
+        if bridge_alive:
+            mode_note = " [yellow](sandbox)[/yellow]" if bridge_mode == "sandbox" else ""
+            table.add_row("data bridge", f"[green]running[/green]{mode_note}")
+        else:
+            table.add_row("data bridge", "[dim]not started (/monitor)[/dim]")
+
+        # monitor UI (Phaser/Vite dev server)
+        mon_alive = (
+            hasattr(self, "_monitor_proc")
+            and self._monitor_proc
+            and self._monitor_proc.poll() is None
         )
         table.add_row(
-            "agentcraft bridge",
-            "[green]running[/green]" if ac_alive else "[dim]not started (/agentcraft)[/dim]",
+            "monitor ui",
+            "[green]running[/green]" if mon_alive else "[dim]not started (/monitor)[/dim]",
+        )
+
+        # sim traffic driver
+        sim_alive = (
+            hasattr(self, "_sim_proc")
+            and self._sim_proc
+            and self._sim_proc.poll() is None
+        )
+        table.add_row(
+            "sim driver",
+            "[green]running[/green]" if sim_alive else "[dim]not started (/sim)[/dim]",
         )
 
         # pending messages
@@ -2272,50 +2341,263 @@ class Supervisor:
         )
         console.print(f"[green]✓ Telegram bridge started (PID: {self._bridge_proc.pid})[/green]")
 
-    def cmd_agentcraft(self, restart: bool = False) -> None:
-        """Start or restart the AgentCraft bridge as a background process.
+    def _bridge_alive(self) -> bool:
+        return (
+            hasattr(self, "_bridge_proc")
+            and self._bridge_proc
+            and self._bridge_proc.poll() is None
+        )
 
-        Tails relay.db / tmux panes / notify.log and forwards events to a
-        locally-running `npx @idosal/agentcraft` server. The bridge probes
-        the AC server until it's reachable, so launching it before AC is
-        up is fine.
+    def _spawn_bridge(self, project_root: Path, mode: str) -> bool:
+        """Spawn `python -m monitor.bridge` with OCTOBOTS_PROJECT_ROOT set.
+
+        Records the watch root in `self._bridge_mode` so callers can tell
+        whether the bridge is pointed at the real project or a sandbox.
+        Returns True on success.
+
+        Even when pointing the bridge at a sandbox (sim mode), the
+        installed agent/skill/MCP catalogue lives in the real project, so
+        we pin OCTOBOTS_RESOURCES_ROOT to PROJECT_DIR. Without this the
+        UI's Monastery and Health panels show empty lists during /sim.
         """
-        if (
-            hasattr(self, "_agentcraft_proc")
-            and self._agentcraft_proc
-            and self._agentcraft_proc.poll() is None
-        ):
-            if not restart:
-                console.print(
-                    f"[yellow]AgentCraft bridge already running "
-                    f"(PID: {self._agentcraft_proc.pid}). Use /agentcraft restart[/yellow]"
-                )
-                return
-            self._agentcraft_proc.terminate()
-            self._agentcraft_proc.wait(timeout=5)
-            console.print("[yellow]AgentCraft bridge stopped.[/yellow]")
-
         launcher = SCRIPT_DIR / "monitor-bridge.sh"
         if not launcher.is_file():
             console.print(f"[red]{launcher} not found[/red]")
-            return
-
-        env = {**os.environ, "OCTOBOTS_PROJECT_ROOT": str(PROJECT_DIR)}
-        self._agentcraft_proc = subprocess.Popen(
+            return False
+        env = {
+            **os.environ,
+            "OCTOBOTS_PROJECT_ROOT": str(project_root),
+            "OCTOBOTS_RESOURCES_ROOT": str(PROJECT_DIR),
+        }
+        self._bridge_proc = subprocess.Popen(
             ["bash", str(launcher)],
-            cwd=str(PROJECT_DIR),
+            cwd=str(project_root),
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        ac_launch = OCTOBOTS_DIR / "monitor" / "bridge" / "agentcraft" / "launch.sh"
-        console.print(
-            f"[green]✓ AgentCraft bridge started (PID: {self._agentcraft_proc.pid})[/green]"
+        self._bridge_mode = mode
+        return True
+
+    def _stop_bridge(self) -> None:
+        if self._bridge_alive():
+            self._bridge_proc.terminate()
+            self._bridge_proc.wait(timeout=5)
+        self._bridge_mode = None
+
+    def cmd_sim(self, action: str = "start") -> None:
+        """Drive synthetic taskbox traffic into a sandbox dir.
+
+        Used to demo monitor-ui without spinning up real workers. Writes
+        into `<project>/.octobots/sim/` — *not* the real relay.db — and
+        temporarily re-points the data bridge at that sandbox so the UI
+        sees the synthetic traffic. `/sim stop` restores the bridge to
+        the real project (if it was running) and stops the sim driver.
+        """
+        sandbox = RUNTIME_DIR / "sim"
+        sim_running = (
+            hasattr(self, "_sim_proc")
+            and self._sim_proc
+            and self._sim_proc.poll() is None
+        )
+
+        if action == "stop":
+            if not sim_running:
+                console.print("[yellow]Sim driver not running.[/yellow]")
+                return
+            self._sim_proc.terminate()
+            self._sim_proc.wait(timeout=5)
+            console.print("[yellow]Sim driver stopped.[/yellow]")
+            # If the bridge is pointed at the sandbox, swing it back to
+            # the real project so the UI keeps showing live data.
+            if getattr(self, "_bridge_mode", None) == "sandbox":
+                self._stop_bridge()
+                if self._spawn_bridge(PROJECT_DIR, "project"):
+                    console.print(
+                        f"[green]✓ Bridge restored to {PROJECT_DIR} "
+                        f"(PID: {self._bridge_proc.pid})[/green]"
+                    )
+            return
+
+        if sim_running and action != "restart":
+            console.print(
+                f"[yellow]Sim driver already running "
+                f"(PID: {self._sim_proc.pid}). Use /sim restart[/yellow]"
+            )
+            return
+        if sim_running and action == "restart":
+            self._sim_proc.terminate()
+            self._sim_proc.wait(timeout=5)
+
+        sim_script = SCRIPT_DIR / "dev" / "sim-traffic.py"
+        if not sim_script.is_file():
+            console.print(f"[red]{sim_script} not found[/red]")
+            return
+
+        sandbox.mkdir(parents=True, exist_ok=True)
+
+        # Re-point the bridge at the sandbox so the UI sees the synthetic
+        # traffic without touching the real relay.db.
+        self._stop_bridge()
+        if not self._spawn_bridge(sandbox, "sandbox"):
+            return
+
+        # Find Python interpreter the same way the Telegram bridge does.
+        python = "python3"
+        for py in (PROJECT_DIR / "venv" / "bin" / "python",
+                   PROJECT_DIR / ".venv" / "bin" / "python"):
+            if py.is_file():
+                python = str(py)
+                break
+
+        self._sim_proc = subprocess.Popen(
+            [python, str(sim_script), str(sandbox)],
+            cwd=str(PROJECT_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         console.print(
-            "[dim]The bridge will probe http://localhost:2468 until AgentCraft "
-            "is reachable.\n"
-            f"Start AgentCraft itself with: {ac_launch}[/dim]"
+            f"[green]✓ Sim driver started (PID: {self._sim_proc.pid})[/green]"
+        )
+        console.print(
+            f"[green]✓ Bridge re-pointed at sandbox: {sandbox}[/green]"
+        )
+        console.print(
+            "[dim]Open the UI with /monitor open. "
+            "Run /sim stop to kill the driver and restore the bridge to "
+            f"{PROJECT_DIR}.[/dim]"
+        )
+
+    def _find_monitor_ui_dir(self) -> Path | None:
+        """Locate the Phaser/Vite monitor UI source tree.
+
+        Resolution order:
+          1. `OCTOBOTS_MONITOR_UI_DIR` env var (explicit override).
+          2. Sibling of the supervisor: `<octobots-workspace>/monitor-ui/`
+             or `<octobots-workspace>/octobots-monitor-ui/`.
+          3. Sibling of the project: `<project>/octobots-monitor-ui/`.
+
+        Returns None if none of the candidates contain a `package.json`.
+        """
+        env_dir = os.environ.get("OCTOBOTS_MONITOR_UI_DIR")
+        candidates = []
+        if env_dir:
+            candidates.append(Path(env_dir).expanduser())
+        # supervisor source layout: /<workspace>/supervisor/  +  /<workspace>/monitor-ui/
+        candidates.append(OCTOBOTS_DIR.parent / "monitor-ui")
+        candidates.append(OCTOBOTS_DIR.parent / "octobots-monitor-ui")
+        # installed layout: target project ships the UI as a sibling of octobots/
+        candidates.append(PROJECT_DIR / "octobots-monitor-ui")
+        candidates.append(PROJECT_DIR / "monitor-ui")
+        for c in candidates:
+            if c.is_dir() and (c / "package.json").is_file():
+                return c.resolve()
+        return None
+
+    def cmd_monitor(self, action: str = "start") -> None:
+        """Start, stop, restart, or open the monitor stack (data bridge + UI).
+
+        Spawns two processes:
+          - the data bridge (`python3 -m monitor.bridge` against PROJECT_DIR),
+            which tails the taskbox + tmux + notify and serves the HTTP+WS
+            endpoint on http://127.0.0.1:2469;
+          - the Vite dev server in the monitor-ui source tree, on :5173.
+
+        Either may already be running (e.g. the bridge has been re-pointed
+        at a sandbox by /sim); in that case we skip spawning the live one.
+        """
+        ui_running = (
+            hasattr(self, "_monitor_proc")
+            and self._monitor_proc
+            and self._monitor_proc.poll() is None
+        )
+
+        if action == "open":
+            url = "http://127.0.0.1:5173/"
+            try:
+                subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                console.print(f"[dim]Open this in your browser: {url}[/dim]")
+            else:
+                console.print(f"[green]Opened {url}[/green]")
+            return
+
+        if action == "stop":
+            stopped_any = False
+            if ui_running:
+                self._monitor_proc.terminate()
+                self._monitor_proc.wait(timeout=5)
+                console.print("[yellow]Monitor UI stopped.[/yellow]")
+                stopped_any = True
+            if self._bridge_alive():
+                self._stop_bridge()
+                console.print("[yellow]Bridge stopped.[/yellow]")
+                stopped_any = True
+            if not stopped_any:
+                console.print("[yellow]Monitor stack not running.[/yellow]")
+            return
+
+        if action == "restart":
+            self.cmd_monitor("stop")
+            ui_running = False  # both are down now
+
+        # Bring up the bridge if it's not already running (e.g. /sim is
+        # holding it). /sim's sandbox mode is intentionally left alone —
+        # the user explicitly chose it.
+        if not self._bridge_alive():
+            if self._spawn_bridge(PROJECT_DIR, "project"):
+                console.print(
+                    f"[green]✓ Data bridge started "
+                    f"(PID: {self._bridge_proc.pid}, watching {PROJECT_DIR})[/green]"
+                )
+
+        # Bring up the UI dev server if it's not already running.
+        if ui_running:
+            console.print(
+                f"[yellow]Monitor UI already running "
+                f"(PID: {self._monitor_proc.pid}). Use /monitor restart to cycle.[/yellow]"
+            )
+            return
+
+        ui_dir = self._find_monitor_ui_dir()
+        if ui_dir is None:
+            console.print(
+                "[red]monitor-ui source tree not found.[/red] Tried "
+                "OCTOBOTS_MONITOR_UI_DIR, sibling of octobots/, and "
+                "sibling of the project root."
+            )
+            return
+
+        node_modules = ui_dir / "node_modules"
+        if not node_modules.is_dir():
+            console.print(
+                f"[yellow]Installing dependencies in {ui_dir}…[/yellow]"
+            )
+            try:
+                subprocess.run(
+                    ["npm", "install", "--no-audit", "--no-fund", "--loglevel=error"],
+                    cwd=str(ui_dir), check=True, timeout=300,
+                )
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+                console.print(f"[red]npm install failed: {e}[/red]")
+                return
+
+        try:
+            self._monitor_proc = subprocess.Popen(
+                ["npm", "run", "dev"],
+                cwd=str(ui_dir),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            console.print("[red]`npm` not found on PATH. Install Node.js 18+.[/red]")
+            return
+        console.print(
+            f"[green]✓ Monitor UI started (PID: {self._monitor_proc.pid})[/green]"
+        )
+        console.print(
+            f"[dim]Dev server at http://127.0.0.1:5173/  "
+            f"(source: {ui_dir})[/dim]"
         )
 
     def _parse_schedule_target(self, rest: list[str]) -> tuple[str, str, str] | None:
@@ -2569,7 +2851,8 @@ class Supervisor:
             ("/resume <role>", "Resume silence healthcheck manually"),
             ("/board", "Show team board"),
             ("/bridge", "Start Telegram bridge (background)"),
-            ("/agentcraft [restart]", "Start AgentCraft bridge (background)"),
+            ("/monitor [start|stop|restart|open]", "Data bridge + Phaser UI dev server"),
+            ("/sim [start|stop|restart]", "Synthetic taskbox traffic for UI demos (sandbox)"),
             ("/health", "System health check"),
             ("/schedule <type> <spec> @role msg", "Schedule a job (at/every/cron)"),
             ("/loop <interval> @role msg", "Shortcut for /schedule every"),
@@ -2641,8 +2924,18 @@ class Supervisor:
             self.cmd_board()
         elif cmd == "/bridge":
             self.cmd_bridge(restart="restart" in args)
-        elif cmd == "/agentcraft":
-            self.cmd_agentcraft(restart="restart" in args)
+        elif cmd == "/monitor":
+            sub = args[0].lower() if args else "start"
+            if sub not in ("start", "stop", "restart", "open"):
+                console.print("[red]Usage: /monitor [start|stop|restart|open][/red]")
+            else:
+                self.cmd_monitor(sub)
+        elif cmd == "/sim":
+            sub = args[0].lower() if args else "start"
+            if sub not in ("start", "stop", "restart"):
+                console.print("[red]Usage: /sim [start|stop|restart][/red]")
+            else:
+                self.cmd_sim(sub)
         elif cmd == "/health":
             self.cmd_health()
         elif cmd == "/schedule":
